@@ -162,6 +162,17 @@ interface ActionResponseItem extends JsonObject {
     }
 }
 
+enum InitialPromptField {
+    richInitialPrompt,
+    richResponse
+}
+
+interface ExpectedInputInputPrompt {
+    richInitialPrompt?: any,
+    initialPrompts: AssistResponse[],
+    [key:string]: any
+}
+
 export interface UserCredentials {
     client_id: string,
     client_secret: string,
@@ -464,6 +475,31 @@ export class ActionsOnGoogle {
      * @public
      */
     send(input: string): Promise<AssistResponse> {
+	function __getRichPrompt(inputPrompt:ExpectedInputInputPrompt,
+				 richResponseField:InitialPromptField)
+	{
+	    let obj = richResponseField === InitialPromptField.richInitialPrompt
+		? inputPrompt.richInitialPrompt
+		: inputPrompt.richResponse
+	    //console.log(`CHECKING ${JSON.stringify(obj,null,2)}`)
+	    if (obj && ('items' in obj)) {
+		return obj
+	    }
+	    try {
+		let textToSpeech = null
+		if (richResponseField === InitialPromptField.richInitialPrompt) {
+		    textToSpeech = inputPrompt.initialPrompts[0].ssml
+		} else {
+		    let finalResponse = inputPrompt
+		    textToSpeech = finalResponse.speechResponse.ssml
+		}
+		let simpleResponse = { textToSpeech }
+		let items = [ { simpleResponse } ]
+		return { items }
+	    } catch (err) {
+		return { items: [] }
+	    }
+	}
         const config = new embeddedAssistantPb.AssistConfig()
         config.setTextQuery(input)
         config.setAudioOutConfig(new embeddedAssistantPb.AudioOutConfig())
@@ -509,7 +545,7 @@ export class ActionsOnGoogle {
                 if (data.dialog_state_out) {
                     this._conversationState = data.dialog_state_out.conversation_state
                     if (data.dialog_state_out.supplemental_display_text &&
-                        !assistResponse.displayText.length) {
+                        !assistResponse.displayText) {
                         assistResponse.textToSpeech =
                             [data.dialog_state_out.supplemental_display_text]
                     }
@@ -518,11 +554,20 @@ export class ActionsOnGoogle {
                     assistResponse.deviceAction = data.device_action.device_request_json
                 }
                 if (data.debug_info) {
-                    const debugInfo = JSON.parse(data.debug_info.aog_agent_to_assistant_json)
+		    const jsonStr = data.debug_info.aog_agent_to_assistant_json
+                    const debugInfo = JSON.parse(jsonStr)
+		    console.log(JSON.stringify(debugInfo, null, 2))
+		    /*
                     const actionResponse =
                         debugInfo.expectedInputs ?
                             debugInfo.expectedInputs[0].inputPrompt.richInitialPrompt :
-                            debugInfo.finalResponse.richResponse
+                        debugInfo.finalResponse.richResponse
+		    */
+		    ///*
+		    const actionResponse = debugInfo.expectedInputs ?
+			  __getRichPrompt(debugInfo.expectedInputs[0].inputPrompt, InitialPromptField.richInitialPrompt) :
+			  __getRichPrompt(debugInfo.finalResponse, InitialPromptField.richResponse)
+		    //*/
                     assistResponse.micOpen = !!debugInfo.expectUserResponse
 
                     // Process a carouselSelect or listSelect
